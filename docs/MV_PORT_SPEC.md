@@ -384,4 +384,22 @@ plugin written yet:
   (all ALG-VERIFIED) driven per level per §10 of the contract. Remaining
   plugin-level decisions (undefined coarsest globalMV, `WriteDefault` typo
   handling, ≥3 levels / batch>1 / partial-input extensions) are listed in
-  the measure report §5.
+  the measure report §5. Plugin-level resolutions (2026-11-01, ninth host
+  plugin `src/host/plugin/ktgmc_analyse_avs.cpp`, header decisions D1-D10):
+  the coarsest globalMV sentinel is the CPU-defined (0,0); WriteDefault
+  implements the intended {0,0,verybigSAD} (the upstream CUDA `.x`-twice
+  typo is deliberately NOT reproduced, §5 layout note); the level loop is
+  generic (upstream pins lv=0 → covered-grid `nAnalyzeLevels`); batch is
+  pinned to 1 (the port's `kt_interpolate_prediction` drops the batch
+  dimension; the per-row plumbing is otherwise per contract §10); 16-bit is
+  supported; `partial` input is rejected with an explicit throw (unmeasured
+  SetMVs extension); the CUDA-dead parameters (meander, badSAD/badrange,
+  tryMany, stp/nSearchParam/nPelSearch) stay in the signature and are
+  ignored exactly like upstream CUDA; and the interp source-sads model is
+  pinned as "incoming (pre-search) sads" — `kl_calc_all_sad`'s recomputed
+  SADs go only to the output VECTORs (the twin's separate `d_dsad` buffer,
+  kmanalyse_host.cu:189, proves upstream CUDA does the same). The plugin is
+  verified bit-exact per VECTOR against an in-exe CPU reference of this
+  assembly (`test_ktgmc_analyse.cpp`, 18 cases / 15 VECTOR-frame checks /
+  0 failures), and the rig CUDA cross-check `rig/dev_ktgmc_analyse.py`
+  remains 39/39.

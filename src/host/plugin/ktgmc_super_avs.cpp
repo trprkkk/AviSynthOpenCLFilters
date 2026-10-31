@@ -52,6 +52,12 @@
 //      tail columns (beyond each level's extended width — never read by the
 //      Search/Compensate consumers) are deterministic; upstream leaves them
 //      undefined.
+//   6. (2026-11-01, ninth-plugin support) The SUPER_FRAME KMVParam is
+//      smuggled into the VideoInfo exactly like upstream KMSuper
+//      (common/KMV.h SetParam: sample_type/num_audio_samples point at the
+//      per-instance param).  No produced pixel changes; without it a chained
+//      KMAnalyseOCL could not learn hpad/vpad/pel/levels/chroma the way
+//      upstream KMAnalyse does.
 //
 // PARAMETERS (upstream KMSuper::Create verbatim):
 //   clip, hpad(int,8), vpad(int,8), pel(int,2), levels(int,0=auto),
@@ -83,6 +89,7 @@
 #include "../ocl_host.h"
 #include "ktgmc_simple_cl.h"  // GENERATED from .../ktgmc/kernels/ktgmc_simple.cl
 #include "ktgmc_motion_cl.h"  // GENERATED from .../ktgmc/kernels/ktgmc_motion.cl
+#include "ktgmc_kmparam.h"    // KMVParam smuggling (upstream common/KMV.h)
 
 namespace {
 
@@ -165,6 +172,8 @@ class KMSuperOCL : public GenericVideoFilter {
 
     std::vector<uint8_t> stage_;  // host staging (byte sized = max plane bytes)
     std::mutex* mtx_;
+    KMVParam kmv_;  // SUPER_FRAME params smuggled to KMAnalyseOCL via the vi
+                    // (upstream KMSuper MV.cpp:721/781: SetParam(vi, &params))
 
     Program& simpleProgram() {
         return oclhost::ProgramRegistry::instance().get(
@@ -282,7 +291,8 @@ public:
                int nSharp, int nRFilter, IScriptEnvironment* env_)
         : GenericVideoFilter(child)
         , nHPad_(nHPad), nVPad_(nVPad), nPel_(nPel), nLevels_(nLevels)
-        , chroma_(chroma), nSharp_(nSharp), nRFilter_(nRFilter) {
+        , chroma_(chroma), nSharp_(nSharp), nRFilter_(nRFilter)
+        , kmv_(KMVParam::SUPER_FRAME) {
         // upstream parameter validation (verbatim)
         if (nHPad_ != 8) env_->ThrowError("[KMSuper] hpad must be 8.");
         if (nVPad_ != 8) env_->ThrowError("[KMSuper] vpad must be 8.");
@@ -320,6 +330,27 @@ public:
 
         vi.width = nSuperWidth_;
         vi.height = nSuperHeight_;
+
+        // smuggle the SUPER_FRAME params into the vi exactly like upstream
+        // KMSuper (MV.cpp:740-781) so a chained KMAnalyseOCL can read them
+        // via KMVParam::GetParam — nWidth/nHeight are the PRE-super dims.
+        kmv_.nWidth = origW_;
+        kmv_.nHeight = origH_;
+        kmv_.nActualWidth = 0;
+        kmv_.nActualHeight = 0;
+        kmv_.yRatioUV = yRatioUV_;
+        kmv_.xRatioUV = xRatioUV_;
+        kmv_.nHPad = nHPad_;
+        kmv_.nVPad = nVPad_;
+        kmv_.nPel = nPel_;
+        kmv_.chroma = chroma_;
+        kmv_.nLevels = nLevels_;
+        kmv_.nDropLevels = 0;
+        kmv_.nPixelSize = nPixelSize_;
+        kmv_.nBitsPerPixel = nBitsPerPixel_;
+        kmv_.nPixelShift = nPixelShift_;
+        kmv_.pixelType = vi.pixel_type;
+        KMVParam::SetParam(vi, &kmv_);
 
         // device pitches / plane sizes (tight)
         pitchY_ = nSuperWidth_;

@@ -544,6 +544,53 @@ lambda/plevel schedules, batch/caching, BGR32 vector-frame layout — needs eith
 an extension of the `run_mv_search.py` one-Search-call assembly or a rig CUDA
 cross-check; recorded rather than shipping a speculative assembly).
 
+## 2026-11-01 — second KTGMC motion host plugin (KMAnalyseOCL, ninth overall)
+
+`src/host/plugin/ktgmc_analyse_avs.cpp` (`ktgmc_analyse_avs.dll`, registers
+`KMAnalyseOCL` with the upstream `KMAnalyse` name as alias and the exact
+upstream signature `"c[blksize]i[overlap]i[search]i[isb]b[chroma]b[delta]i[lambda]i[lsad]i[global]b[plevel]i[pnew]i[meander]b[partial]c[batch]i"`)
+chains directly behind KMSuperOCL — `KMSuperOCL(src,...).KMAnalyseOCL(...)`,
+the motion-analysis half of the KTGMC pipeline. It replays the proven
+multi-level `GroupOfPlanes` coarse→fine loop (cuda_mv/KMANALYSE_HOST_CONTRACT.md
+§10) per level i = nLevels-1…0 with NO new kernels: the global-MV chain
+(`kt_most_freq_mv` staged-fold tie-break → `kt_mean_global_mv` doubled),
+`kt_interpolate_prediction` into the fine level, host-written
+sentinels (slot −2 zero / slot −1 globalMV·nPel), the proven one-Search
+assembly (`kt_prepare_search` → ordered per-column `kt_search_column` →
+`kt_calc_all_sad`), and the BGR32 VECTOR output frame assembled coarsest level
+first. Per-level forcing (EXHAUSTIVE on coarse levels, nPel=1 on coarse,
+nLambdaLevel = λ/(nPelLevel²) with the plevel scaling, nPad = the super's 8 at
+every level, covered-grid level count validated against the super's nLevels)
+is transcribed from MV.cpp:2248-2282/2508-2573. The SUPER_FRAME `KMVParam` is
+now smuggled KMSuperOCL → KMAnalyseOCL through the VideoInfo exactly like
+upstream (common/KMV.h SetParam: sample_type/num_audio_samples), and the MV
+clip's vi carries the MV_FRAME params for the later KMCompensate/KMDegrain
+stages; computed frames carry `KMVIsValid=true` (false on WriteDefault
+frames). Verified headless by `test_ktgmc_analyse.cpp` (real AviSynth+ 3.7.3
+autoload, chain built through the real `KMSuperOCL` plugin; reference = an
+in-exe CPU implementation of the proven loop — CPU super planes from the
+verified super reference + the `sim/ktgmc_search_ref.cpp` Search model +
+the global-MV/interp kernels transcribed from `ktgmc_motion.cl`): 18 cases /
+15 VECTOR-frame checks / 0 failures — EVERY (x,y,sad) of EVERY level's output
+region and the final frame bit-exact (206 VECTORs x 3 levels on the 64x48
+default, 41 x 2 levels on 32x24 and blksize=16), covering pel 1/2, chroma
+on/off, fine-level HEX2SEARCH and EXHAUSTIVE, plevel=2, global=off, backward
+search, 16-bit, the parameter defaults, the `KMAnalyse` alias, a real script
+string, the WriteDefault out-of-range frame, and the constructor throws.
+Build with `build_host_analyse.bat` (embeds `ktgmc_motion.cl` +
+`ktgmc_search.cl`). Documented plugin-level decisions (measure report §5,
+plugin header D1-D10): coarsest global-MV sentinel = CPU-defined (0,0);
+WriteDefault = the intended {0,0,verybigSAD} (the upstream CUDA `.x`-twice
+typo is NOT reproduced); the generic level loop (upstream pins lv=0; 2-level
+configurations are CUDA-twin-measured, 3-level via the CPU reference); batch
+pinned to 1 (the port's `kt_interpolate_prediction` has no batch dimension);
+16-bit supported; `partial` rejected (unmeasured SetMVs path); the
+CUDA-dead parameters (meander, badSAD/badrange, tryMany, stp/nSearchParam/
+nPelSearch) kept in the signature and ignored exactly like upstream CUDA;
+the level's sads work buffer keeps the INCOMING sads (calc_all_sad writes
+only the output VECTORs — twin-proven); no batch-result cache; only the
+out_frame_bytes vector bytes of the BGR32 frame are written.
+
 ## Licensing
 
 The ported kernels are derived from `rigaya/AviSynthCUDAFilters`, which is a fork

@@ -16,3 +16,4 @@ src/host/plugin/kfm_combinganalyze_cl.h
 src/host/plugin/kfm_decombeucf_cl.h
 src/host/plugin/ktgmc_motion_cl.h
 src/host/plugin/ktgmc_simple_cl.h
+src/host/plugin/ktgmc_search_cl.h

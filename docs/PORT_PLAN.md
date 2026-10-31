@@ -352,6 +352,38 @@ successor KMAnalyse is inventoried but deliberately not assembled (the
 multi-level `GroupOfPlanes` host loop needs an extension of the
 `run_mv_search.py` one-Search-call assembly or a rig CUDA cross-check).
 
+The ninth, 2026-11-01 — `ktgmc_analyse_avs.cpp` (KMAnalyseOCL, upstream
+`KMAnalyse` alias, exact upstream signature; the SECOND motion-stage plugin,
+chained directly behind KMSuperOCL as `KMSuperOCL(...).KMAnalyseOCL(...)`):
+the proven multi-level `GroupOfPlanes` coarse→fine loop from
+`cuda_mv/KMANALYSE_HOST_CONTRACT.md` §10 driven over the ALG-VERIFIED
+`ktgmc_motion.cl` / `ktgmc_search.cl` kernels with NO new kernels — per level
+i = nLevels-1…0: `kt_most_freq_mv`+`kt_mean_global_mv` (global-MV chain,
+doubled) on the coarse level's post-search vectors, `kt_interpolate_prediction`
+into the fine level, host-written sentinels, the one-Search assembly
+(`kt_prepare_search` → ordered per-column `kt_search_column` →
+`kt_calc_all_sad`), and the BGR32 VECTOR output frame assembled coarsest
+level first. The SUPER_FRAME `KMVParam` is smuggled KMSuperOCL → KMAnalyseOCL
+through the VideoInfo exactly like upstream (`ktgmc_kmparam.h`, common/KMV.h
+SetParam), and the MV clip's vi carries the MV_FRAME params for downstream
+KMCompensate/KMDegrain; frames carry the `KMVIsValid` prop. 18 headless cases
+/ 15 VECTOR-frame checks / 0 failures via `test_ktgmc_analyse.cpp` (real
+AviSynth+ 3.7.3; the reference is an in-exe CPU implementation of the proven
+loop: verified CPU super planes + the `sim/ktgmc_search_ref.cpp` Search model
++ the global-MV/interp kernels transcribed from `ktgmc_motion.cl`; every
+(x,y,sad) of every level bit-exact, 3-level 64x48 default + 2-level 32x24 +
+blksize=16, pel 1/2, chroma on/off, HEX/EXHAUSTIVE fine, plevel, global=off,
+backward, 16-bit, WriteDefault frame, alias + script-string + throws).
+`rig/dev_ktgmc_analyse.py` (the CUDA-twin cross-check, 39/39) stays green.
+Build with `build_host_analyse.bat`. Documented decisions D1-D10 in the
+plugin header (measure report §5): CPU-defined coarsest globalMV (0,0),
+intended WriteDefault {0,0,verybigSAD} (upstream CUDA `.x`-twice typo not
+reproduced), generic level loop (2-level CUDA-twin-measured, 3-level
+CPU-reference-covered), batch=1 only (port interp kernel has no batch dim),
+16-bit supported, `partial` rejected (unmeasured), CUDA-dead params kept and
+ignored, incoming-sads interp model (calc_all_sad writes only the outputs),
+no batch cache, only the vector bytes of the BGR32 frame written.
+
 ## 7. Licensing
 
 KTGMC-derived files follow the upstream **GPL** (per
