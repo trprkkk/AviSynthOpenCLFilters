@@ -357,3 +357,31 @@ the remaining groups above there.
 `KTGMC` (incl. the MV engine) is **GPL** per the upstream `AviSynthCUDAFilters`
 README; `common/KMV.h` type defs come from the same tree. Distribute derived
 files under the matching upstream terms.
+
+## 9. 2026-11-01: KMAnalyse multi-level host loop PROVEN (measurement slice)
+
+The `GroupOfPlanes` coarse→fine loop that KMAnalyse runs around the (already
+ALG-VERIFIED) Search quartet has been settled on the rig — evidence-first, no
+plugin written yet:
+
+- Contract: `cuda_mv/KMANALYSE_HOST_CONTRACT.md` (level order coarse→fine,
+  per-level searchType/nPel/nLambdaLevel forcing MV.cpp:2250-2261, the
+  global-MV chain `kl_most_freq_mv`→`kl_mean_global_mv`×2→`slot −1 =
+  globalMV·nPel` MVKernel.cu:2664-2673/1708-1717, `kl_interpolate_prediction`
+  using the x-axis weights for both axes MV.cpp:2110-2118, BGR32 VECTOR frame
+  coarsest-level-first MV.cpp:2664-2668/3838-3842, scene change NOT part of
+  Analyse, per-level padding model).
+- Measurement: `cuda_mv/KMANALYSE_MEASURE_REPORT.md` — CUDA twin
+  (`cuda_mv/kmanalyse_host.cu`, verbatim MVKernel.cu 269..1627) vs the port's
+  OpenCL chain (`rig/dev_ktgmc_analyse.py`) is **bit-exact at every stage of
+  every level** for pel=1/pel=2 × chroma on/off (39/39 checks, incl. the
+  final MV frame). A twin bug caught en route (level-0 init wiping the
+  interpolated predictors) is exactly the plausible-but-wrong-MV failure
+  mode; the golden adjudication and fix are recorded in the report §3.
+- Consequence: a KMAnalyse host plugin needs NO new kernels — it is the
+  proven one-Search assembly (§6, Program B/C) plus
+  `kt_most_freq_mv`/`kt_mean_global_mv`/`kt_interpolate_prediction`
+  (all ALG-VERIFIED) driven per level per §10 of the contract. Remaining
+  plugin-level decisions (undefined coarsest globalMV, `WriteDefault` typo
+  handling, ≥3 levels / batch>1 / partial-input extensions) are listed in
+  the measure report §5.
