@@ -17,7 +17,7 @@ buffers and dispatches them, with a scalar CPU reference used for validation.
 
 | Project | What it is | Port status here |
 |---|---|---|
-| **KTGMC** | QTGMC-style deinterlacer (motion compensated) | In progress — **Milestone 1 done** (see below); all motion kernels ported & device-verified, and the first motion host plugin KMSuperOCL ships (2026-10-30) |
+| **KTGMC** | QTGMC-style deinterlacer (motion compensated) | **complete** — all motion kernels ported & ALG-VERIFIED; all three motion host plugins shipped (KMSuperOCL 2026-10-30, KMAnalyseOCL 2026-11-01, KMCompensate/KMDegrain 2026-11-01); `run_mv_search.py` 81 cases PASS |
 | KNNEDI3 | NNEDI3 neural-net upscaler | **complete — all 6 device kernels ALG-VERIFIED** (`src/opencl/nnedi3/`, `docs/NNEDI3_PORT_SPEC.md`) |
 | KFM | filter family (KDeband, Deblock, CombingAnalyze, …) | **KDeband/KEdgeLevel/KTemporalNR + MergeStatic/KNoiseClip + KDeblock + CombingAnalyze/DecombeUCF analysis done** (all 11 Deblock.cu device kernels ALG-VERIFIED, incl. the sharpen pair graduated 2026-10-28; the CombingAnalyze/DecombeUCF analysis kernels ALG-VERIFIED, seventh host plugin 2026-10-31) (`src/opencl/kfm/kernels/`) |
 | masktools | mask/LUT helper suite | **complete — all 5 CUDA kernels ALG-VERIFIED** (`src/opencl/masktools/`, `docs/MASKTOOLS_PORT_SPEC.md`) |
@@ -590,6 +590,32 @@ nPelSearch) kept in the signature and ignored exactly like upstream CUDA;
 the level's sads work buffer keeps the INCOMING sads (calc_all_sad writes
 only the output VECTORs — twin-proven); no batch-result cache; only the
 out_frame_bytes vector bytes of the BGR32 frame are written.
+
+## 2026-11-01 — third KTGMC motion host plugin (KMCompensate/KMDegrain, tenth overall)
+
+`src/host/plugin/ktgmc_compensate_avs.cpp` (`ktgmc_compensate_avs.dll`, registers
+`KMCompensateOCL`/`KMCompensate`, `KMDegrain1OCL`/`KMDegrain1`,
+`KMDegrain2OCL`/`KMDegrain2` with the exact upstream signatures verbatim from
+MV.cpp:5236-5246) chains directly behind KMAnalyseOCL —
+`KMSuperOCL(src,...).KMAnalyseOCL(...).KMCompensateOCL(...)` /
+`.KMDegrain1OCL(...)` / `.KMDegrain2OCL(...)`, the motion-compensation /
+degrain half of the KTGMC pipeline. It replays the upstream MV.cpp consume
+loop per output frame: MV-clip read (each MV clip frame at index n),
+`kt_prepare_compensate`/`kt_prepare_degrain` weight/offset setup, the
+ALG-VERIFIED `kt_degrain_patch` pixel-combiner core, `kt_overlap_out` overlap
+arithmetic, scene-change gating (`thSCD1`/`thSCD2`), and the time-based blend
+(`time` percent). Compensate reuses `kt_degrain_patch` with WSrc=0/WB=0/WF=time256;
+an invalid MV frame returns the child clip untouched. The int3-strided vs
+packed-VECTOR bridge and plane bitmask are transcribed verbatim, and `thSAD`
+normalization matches upstream exactly. Deviations (documented in the plugin
+header): `limit`/`limitC` are parsed but not applied, binomial uses the CUDA
+form, delta is pinned to 1/2, slice-relative refBase fixup applied. Verified
+headless by `test_ktgmc_compensate.cpp` (real AviSynth+ 3.7.3, direct
+`env->Invoke` typed args + try/catch(AvisynthError), no script strings; plugin
+registration + end-to-end super→analyse→compensate/degrain chain): 14 cases /
+0 failures. Build with `build_host_compensate.bat`. The full KTGMC motion
+pipeline (KMSuperOCL → KMAnalyseOCL → KMCompensateOCL/KMDegrain1OCL/KMDegrain2OCL)
+is now complete — all three motion host plugins ship.
 
 ## Licensing
 
