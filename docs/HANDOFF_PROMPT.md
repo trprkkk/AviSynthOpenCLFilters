@@ -11,7 +11,7 @@ the source of truth and are machine-checked by `lint/audit_inventory.py`.
 ## A. Full handoff prompt
 
 > You are continuing a port of `rigaya/AviSynthCUDAFilters` (CUDA, GPL) to
-> OpenCL. The repository is `trprkkk/opencl_filter`. The previous agent's
+> OpenCL. The repository is `trprkkk/AviSynthOpenCLFilters`. The previous agent's
 > work is finished and committed; nothing is half-done in the tree.
 >
 > **Read these three documents before touching anything, in this order:**
@@ -96,7 +96,7 @@ the source of truth and are machine-checked by `lint/audit_inventory.py`.
 ## B. Short form
 
 > Continuing the OpenCL port of `rigaya/AviSynthCUDAFilters` in
-> `trprkkk/opencl_filter`. Start at `docs/RIG_HANDOFF_BRINGUP.md` (§2 =
+> `trprkkk/AviSynthOpenCLFilters`. Start at `docs/RIG_HANDOFF_BRINGUP.md` (§2 =
 > findings to act on, §2.7 = definition of done, §3 = order). Verify state
 > with `make test` (expect 33 PASS, `audit: OK`) and `./lint/lint_opencl.sh`
 > (46/0).

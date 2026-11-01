@@ -1,4 +1,4 @@
-# opencl_filter
+# AviSynthOpenCLFilters
 
 Vendor-agnostic **OpenCL** re-implementations of video filters originally written
 for **NVIDIA CUDA** in [`rigaya/AviSynthCUDAFilters`](https://github.com/rigaya/AviSynthCUDAFilters)
