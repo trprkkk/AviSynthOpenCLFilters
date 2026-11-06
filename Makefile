@@ -12,7 +12,7 @@ lint:
 	./lint/lint_opencl.sh
 
 ref:
-	mkdir -p build
+	-@mkdir build 2>nul
 	$(CXX) $(CXXFLAGS) -w sim/ktgmc_cpu_ref.cpp -o $(REF_BIN)
 
 test: ref lint

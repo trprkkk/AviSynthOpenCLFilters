@@ -143,7 +143,7 @@ def golden(c):
 
 
 def main():
-    subprocess.run(["g++", "-O2", "-std=c++17", "-w",
+    subprocess.run(["g++", "-O2", "-std=gnu++17", "-Wl,--allow-multiple-definition", "-w",
                     os.path.join(REPO, "sim", "ktgmc_degrain_ref.cpp"),
                     "-o", BIN], check=True)
     rng = random.Random(41)

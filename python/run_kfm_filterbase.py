@@ -297,7 +297,7 @@ def golden_extend_cpu(src, nBlkX, nBlkY, pitch):
 
 
 def main():
-    subprocess.run(["g++", "-O2", "-std=c++17", "-ffp-contract=off", "-w",
+    subprocess.run(["g++", "-O2", "-std=gnu++17", "-Wl,--allow-multiple-definition", "-ffp-contract=off", "-w",
                     os.path.join(REPO, "sim", "kfm_filterbase_ref.cpp"),
                     "-o", BIN], check=True)
     rng = random.Random(19)

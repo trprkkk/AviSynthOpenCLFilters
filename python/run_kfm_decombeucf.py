@@ -119,7 +119,7 @@ def golden_analyze_diff(width, height, pitch, i0, i1, f0, f1):
 
 
 def main():
-    subprocess.run(["g++", "-O2", "-std=c++17", "-ffp-contract=off", "-w",
+    subprocess.run(["g++", "-O2", "-std=gnu++17", "-Wl,--allow-multiple-definition", "-ffp-contract=off", "-w",
                     os.path.join(REPO, "sim", "kfm_decombeucf_ref.cpp"),
                     "-o", BIN], check=True)
     rng = random.Random(97)

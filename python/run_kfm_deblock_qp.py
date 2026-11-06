@@ -89,7 +89,7 @@ def main():
     # -mfpmath=sse -msse2: per-op float32 required for bit-exactness vs the
     # golden (32-bit x87 toolchains keep 80-bit intermediates — see
     # run_kfm_deblock.py).
-    subprocess.run(["g++", "-O2", "-std=c++17", "-ffp-contract=off",
+    subprocess.run(["g++", "-O2", "-std=gnu++17", "-Wl,--allow-multiple-definition", "-ffp-contract=off",
                     "-mfpmath=sse", "-msse2", "-w",
                     os.path.join(REPO, "sim", "kfm_deblock_qp_ref.cpp"),
                     "-o", BIN], check=True)

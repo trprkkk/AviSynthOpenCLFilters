@@ -83,7 +83,7 @@ def golden(width, height, pitch, rngv, thresh, mode, blur, maxv, src, rand):
 
 
 def main():
-    subprocess.run(["g++", "-O2", "-std=c++17", "-w",
+    subprocess.run(["g++", "-O2", "-std=gnu++17", "-Wl,--allow-multiple-definition", "-w",
                     os.path.join(REPO, "sim", "kfm_deband_ref.cpp"),
                     "-o", BIN], check=True)
     rng = random.Random(7)

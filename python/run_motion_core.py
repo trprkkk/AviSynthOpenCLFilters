@@ -20,9 +20,10 @@ MaxIndexReducer/dev_reduce2, upstream @ 68aef6e).  The rule was validated
 
 Run:  python3 python/run_motion_core.py
 """
-import os, random, subprocess, sys
+import os, random, subprocess, sys, tempfile
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+WREF_BIN = os.path.join(tempfile.gettempdir(), "wref")
 
 def degw(th, bs):
     if th <= bs:
@@ -166,10 +167,10 @@ def main():
             exp.append("n %d %s" % (r[0], " ".join(map(str, r[1:]))))
     exp += ["f %d" % v for v in mf_exp]
 
-    subprocess.run(["g++", "-O2", "-std=c++17", "-w",
+    subprocess.run(["g++", "-O2", "-std=gnu++17", "-w", "-Wl,--allow-multiple-definition",
                     os.path.join(REPO, "sim", "ktgmc_weight_ref.cpp"),
-                    "-o", "/tmp/wref"], check=True)
-    out = subprocess.run(["/tmp/wref"], input="\n".join(lines + mf_lines) + "\n",
+                    "-o", WREF_BIN], check=True)
+    out = subprocess.run([WREF_BIN], input="\n".join(lines + mf_lines) + "\n",
                          capture_output=True, text=True).stdout.splitlines()
     mism = sum(1 for e, g in zip(exp, out) if e != g)
     ok = mism == 0 and len(exp) == len(out)

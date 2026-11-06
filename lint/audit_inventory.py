@@ -29,7 +29,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 def kernel_lines(path):
     """Kernels are counted by declaration lines starting with `kernel`/
     `__kernel` — the same rule PERF_NOTES used, so counts stay comparable."""
-    with open(path) as f:
+    with open(path, encoding='utf-8', errors='replace') as f:
         return [l for l in f if re.match(r'^(__)?kernel\b', l)]
 
 
@@ -42,36 +42,36 @@ def main():
     total = 0
     for f in cl_files:
         n = len(kernel_lines(f))
-        per_family[f.split('/')[2]] = per_family.get(f.split('/')[2], 0) + n
+        per_family[f.replace('\\', '/').split('/')[2]] = per_family.get(f.replace('\\', '/').split('/')[2], 0) + n
         total += n
 
     runners = sorted(glob.glob('python/run_*.py'))
     mirrors = sorted(glob.glob('sim/*.cpp'))
 
     # 1. wiring
-    mk = open('Makefile').read()
+    mk = open('Makefile', encoding='utf-8', errors='replace').read()
     wired = set(re.findall(r'^\tpython3 (python/\S+)', mk, re.M))
     for r in runners:
-        if r not in wired:
+        if r.replace('\\', '/') not in wired:
             problems.append(f"runner not wired into make test: {r}")
     for r in sorted(wired):
-        if not os.path.exists(r):
+        if not os.path.exists(r.replace('/', '\\')):
             problems.append(f"Makefile runs a missing runner: {r}")
 
     # 2. mirrors referenced
     referenced = set()
     for r in runners:
-        t = open(r).read()
+        t = open(r, encoding='utf-8', errors='replace').read()
         for m in re.findall(r'"([\w]+\.cpp)"', t):
             referenced.add('sim/' + m)
     for s in mirrors:
-        if s not in referenced:
+        if s.replace('\\', '/') not in referenced:
             problems.append(f"mirror never referenced by a runner: {s}")
 
     # 3. handoff headline numbers
     hb = 'docs/RIG_HANDOFF_BRINGUP.md'
     if os.path.exists(hb):
-        t = open(hb).read()
+        t = open(hb, encoding='utf-8', errors='replace').read()
         want = [
             (rf'\*\*{total} OpenCL kernels\*\*', f'kernel total {total}'),
             (rf'\*\*{len(runners)} verification runners\*\*',
@@ -91,7 +91,7 @@ def main():
 
     # 4. quarantine markers
     for f in sorted(glob.glob('src/opencl/*/kernels/*_rig.cl')):
-        lines = open(f).readlines()
+        lines = open(f, encoding='utf-8', errors='replace').readlines()
         for i, l in enumerate(lines):
             if re.match(r'^(__)?kernel\b', l):
                 # look back a few lines for a self-claim

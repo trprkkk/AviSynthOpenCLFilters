@@ -167,7 +167,7 @@ def main():
     # every operation).  On 32-bit x87 toolchains (mingw32) intermediates keep
     # 80-bit precision between ops, which shifts threshold/truncation
     # boundaries and breaks bit-exactness — force SSE math.
-    subprocess.run(["g++", "-O2", "-std=c++17", "-ffp-contract=off",
+    subprocess.run(["g++", "-O2", "-std=gnu++17", "-Wl,--allow-multiple-definition", "-ffp-contract=off",
                     "-mfpmath=sse", "-msse2", "-w",
                     os.path.join(REPO, "sim", "kfm_deblock_ref.cpp"),
                     "-o", BIN], check=True)

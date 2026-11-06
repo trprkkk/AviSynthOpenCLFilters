@@ -178,7 +178,7 @@ def from444_golden(width, height, sp, lx, ly, src):
 
 
 def main():
-    subprocess.run(["g++", "-O2", "-std=c++17", "-ffp-contract=off", "-w",
+    subprocess.run(["g++", "-O2", "-std=gnu++17", "-Wl,--allow-multiple-definition", "-ffp-contract=off", "-w",
                     os.path.join(REPO, "sim", "kfm_edgelevel_ref.cpp"),
                     "-o", BIN], check=True)
     rng = random.Random(11)

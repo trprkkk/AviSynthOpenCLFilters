@@ -44,7 +44,7 @@ def golden(width, height, pitch, nmin, rng, src, noise):
 
 
 def main():
-    subprocess.run(["g++", "-O2", "-std=c++17", "-ffp-contract=off", "-w",
+    subprocess.run(["g++", "-O2", "-std=gnu++17", "-Wl,--allow-multiple-definition", "-ffp-contract=off", "-w",
                     os.path.join(REPO, "sim", "kfm_noiseclip_ref.cpp"),
                     "-o", BIN], check=True)
     rng = random.Random(23)

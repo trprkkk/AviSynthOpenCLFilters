@@ -49,7 +49,7 @@ def nblk(n, d):
 
 
 def main():
-    subprocess.run(["g++", "-O2", "-std=c++17", "-ffp-contract=off", "-w",
+    subprocess.run(["g++", "-O2", "-std=gnu++17", "-Wl,--allow-multiple-definition", "-ffp-contract=off", "-w",
                     os.path.join(REPO, "sim", "nnedi3_prescreen_ref.cpp"),
                     "-o", BIN], check=True)
     rng = random.Random(9021)
