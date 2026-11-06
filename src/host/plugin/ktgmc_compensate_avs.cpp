@@ -94,24 +94,30 @@
 //      DegrainN template supports up to 6 but GetDegrainFunction
 //      MV.cpp:3983-3993 instantiates 1/2 only).
 //  V4. Reference staging:  the per-delta super frames are staged as SLICES of
-//      one flat buffer per (plane, direction); kt_prepare_degrain computes
-//      slice-0-relative refBase entries, and the host adds i*sliceElems for
-//      each usable ref i (a plain SVM fixup).  Unusable refs keep offset 0
-//      with weight 0 — never read with a nonzero weight (§6.3 encoding).
+//      one flat buffer per (plane, direction).  Each slice is the complete
+//      level-0 region — nPel^2 sub-planes x (planeH + 2*vpad) rows at the
+//      super row stride — so sub-pel ref fetches hit staged data even when the
+//      super frame's AviSynth row pitch differs from its tight width.  Source
+//      planes stay tight (pitch = source width); ref planes use superPitch.
+//      kt_prepare_degrain computes slice-0-relative refBase entries, and the
+//      host adds i*sliceElems for each usable ref i (a plain SVM fixup).
+//      Unusable refs keep offset 0 with weight 0 — never read with a nonzero
+//      weight (§6.3 encoding).
 //  V5. Compensate patches are produced with kt_degrain_patch as an exact
 //      copy:  delta=1, WSrc=0, WRefF=time256 gives (time256*v+128)>>8 for 8-bit
 //      and (time256*v)>>8 for 16-bit, i.e. a pure time-blend.  No new kernel
 //      is introduced for the compensate fetch; the verified combiner +
-//      overlap path is reused.
-//  V6. Compensate:  an invalid MV frame (KMVIsValid=0) or out-of-range ref
-//      index returns the child frame untouched — the upstream CPU behavior
-//      (MV.cpp:5176-5178; upstream's CUDA path would proceed with null
-//      planes there, so the CPU behavior is the defined one).  A scene change
-//      (count > nTh2) is handled INSIDE the kernel model:  prepare emits the
-//      -1 sentinels and the output plane is the source plane — identical to
-//      upstream CPU `return child->GetFrame(n)` and to the CUDA
-//      isCopySrc/kl_short_to_byte_or_copy_src path (MVKernel.cu:2224-2233/
-//      2315-2332), which also copies the uncovered region from src.
+//      overlap path is reused.  kt_prepare_compensate's per-block ref_sel is
+//      honored by staging pRef0 (the super frame at n) in slice 0 and the
+//      motion pRef in slice 1, then adding sliceElems to the refBase of every
+//      ref_sel==1 block.  time256 is upstream's truncating
+//      `int(256 * time / 100)` (MV.cpp:5122).
+//  V6. Compensate:  an invalid MV frame (KMVIsValid=0), an out-of-range ref
+//      index, or a frame-level scene change (count > nTh2) returns the child
+//      frame untouched — the upstream CPU behavior (MV.cpp:5176-5178).  This
+//      is implemented as a host early return before staging; upstream CUDA
+//      reaches the same whole-frame source copy through the block-uniform
+//      winOver==nullptr / isCopySrc path (MVKernel.cu:2175-2179/2224-2233).
 //  V7. kt_scene_change(_x2) consume int3-STRIDED MV buffers (OpenCL int3
 //      stride 16 — NOT the packed 12-byte VECTOR layout; BLOCKSEARCH_MODEL
 //      §8a); the prepare kernels consume packed int triples.  The host keeps
@@ -222,6 +228,8 @@ struct PlaneGeom {   // per-plane launch geometry (Y: shift 0, UV: shift 1)
     int superPitch = 0;   // super plane pitch (tight)
     int imgPitch = 0;     // superPitch * extH (one sub-pel plane)
     int sliceElems = 0;   // one staged whole super plane (delta slice stride)
+    int extH = 0;         // level-0 sub-plane height incl. vpad
+    int lvl0Rows = 0;     // nPel^2 * extH: full level-0 region rows
     int width = 0, height = 0;
     int nPad = 0;
 };
@@ -288,17 +296,20 @@ static void stageMvSlice(SvmBuffer& mvI3, size_t sliceOff4, SvmBuffer& mvPack,
     }
 }
 
-// stageRefSlice — one delta-slice of a super frame as a tight-pitch plane
+// stageRefSlice — the full level-0 region (all nPel^2 sub-planes) of one
+// delta-slice of a super frame, verbatim at the super row stride.  The
+// kernels address refs with superPitch/nImgPitch, so sub-pel fetches must see
+// the staged sub-planes, not just the sub-plane-0 source window (V4).
 static void stageRefSlice(SvmBuffer& buf, int j, const PlaneGeom& g, size_t px,
                           PVideoFrame& f, int plane,
                           std::vector<uint8_t>& stage) {
-    const size_t rowbytes = (size_t)g.width * px;
-    for (int y = 0; y < g.height; y++)
+    const size_t rowbytes = (size_t)g.superPitch * px;
+    for (int y = 0; y < g.lvl0Rows; y++)
         memcpy(stage.data() + (size_t)y * rowbytes,
                f->GetReadPtr(plane) + (size_t)y * f->GetPitch(plane),
                rowbytes);
     buf.write(stage.data(), (size_t)j * g.sliceElems * px,
-              rowbytes * g.height);
+              rowbytes * g.lvl0Rows);
 }
 
 // ============================================================================
@@ -440,54 +451,35 @@ class KMDegrainOCL : public GenericVideoFilter {
         g.bs = BS_ >> shift;
         g.step = (BS_ - ovr_) >> shift;
         g.ovr = ovr_ >> shift;
-        g.pitch = shift ? pitchUV_ : pitchY_;
         g.superPitch = shift ? pitchUV_ : pitchY_;
         const int extH = shift
             ? (superPar_->nHeight / superPar_->yRatioUV + 2 * vpadU_)
             : (superPar_->nHeight + 2 * superPar_->nVPad);
+        g.extH = extH;
+        g.lvl0Rows = nPel_ * nPel_ * extH;
         g.imgPitch = g.superPitch * extH;
         g.sliceElems = g.superPitch * planeRows;
         g.width = par_->nWidth >> shift;
         g.height = par_->nHeight >> shift;
+        g.pitch = g.width;   // source staging is tight; superPitch is for refs
         g.nPad = nHPad_ >> shift;
         return g;
     }
 
     // stage lvl0 triples as int3-strided slices + kt_load_mv_batch per
-    // delta and repack into the packed triples (V7)
+    // delta and repack into the packed triples (V7).  The readback MUST happen
+    // per slice: vecSc_/sadSc_ are scratch, so a read after the dispatch loop
+    // would replicate the last delta into every slice (delta=2 bug).
     void stageMv(SvmBuffer& mvI3, SvmBuffer& mvPack,
                  std::vector<cl_int> lvl0[2], Context& ctx, Program& PM) {
         const int nb = nBlk0();
         for (int j = 0; j < delta_; j++) {
             if (lvl0[j].size() < (size_t)nb * 3)
                 lvl0[j].assign((size_t)nb * 3, 0);  // skipped direction (useFlag)
-            for (int b = 0; b < nb; b++) {
-                cl_int quad[4] = { lvl0[j][3 * b + 0], lvl0[j][3 * b + 1],
-                                   lvl0[j][3 * b + 2], 0 };
-                mvI3.write(quad, ((size_t)j * nb + b) * sizeof(cl_int) * 4,
-                           sizeof(cl_int) * 4);
-            }
+            stageMvSlice(mvI3, (size_t)j * nb * 4 * sizeof(cl_int), mvPack,
+                         (size_t)j * nb * 3 * sizeof(cl_int),
+                         vecSc_, sadSc_, outSc_, lvl0[j], nb, ctx, PM);
         }
-        for (int j = 0; j < delta_; j++) {
-            cl_kernel k = PM.kernel("kt_load_mv_batch");
-            oclhost::set_arg_svm(k, 0, outSc_.ptr());
-            oclhost::set_arg_svm(k, 1, mvI3.at((size_t)j * nb * 4 * sizeof(cl_int)));
-            oclhost::set_arg_svm(k, 2, vecSc_.ptr());
-            oclhost::set_arg_svm(k, 3, sadSc_.ptr());
-            oclhost::set_arg(k, 4, nb);
-            oclhost::dispatch1D(ctx, k, nb);
-        }
-        ctx.finish();
-        std::vector<cl_int2> vecs((size_t)nb);
-        std::vector<cl_int> sads((size_t)nb);
-        vecSc_.read(vecs.data(), 0, sizeof(cl_int2) * nb);
-        sadSc_.read(sads.data(), 0, sizeof(cl_int) * nb);
-        for (int j = 0; j < delta_; j++)
-            for (int b = 0; b < nb; b++) {
-                cl_int trip[3] = { vecs[b].x, vecs[b].y, sads[b] };
-                mvPack.write(trip, ((size_t)j * nb + b) * sizeof(cl_int) * 3,
-                             sizeof(cl_int) * 3);
-            }
     }
 
     // one plane's full degrain path
@@ -969,15 +961,17 @@ class KMCompensateOCL : public GenericVideoFilter {
         g.bs = BS_ >> shift;
         g.step = (BS_ - ovr_) >> shift;
         g.ovr = ovr_ >> shift;
-        g.pitch = shift ? pitchUV_ : pitchY_;
         g.superPitch = shift ? pitchUV_ : pitchY_;
         const int extH = shift
             ? (superPar_->nHeight / superPar_->yRatioUV + 2 * vpadU_)
             : (superPar_->nHeight + 2 * superPar_->nVPad);
+        g.extH = extH;
+        g.lvl0Rows = nPel_ * nPel_ * extH;
         g.imgPitch = g.superPitch * extH;
         g.sliceElems = g.superPitch * planeRows;
         g.width = par_->nWidth >> shift;
         g.height = par_->nHeight >> shift;
+        g.pitch = g.width;   // source staging is tight; superPitch is for refs
         g.nPad = nHPad_ >> shift;
         return g;
     }
@@ -1013,14 +1007,18 @@ class KMCompensateOCL : public GenericVideoFilter {
         }
     }
 
-    void stageRefSlice(SvmBuffer& buf, PVideoFrame& f, int plane) {
-        const PlaneGeom& g = plane ? gU_ : gY_;
-        const size_t rowbytes = (size_t)g.width * px_;
-        for (int y = 0; y < g.height; y++)
+    // stage one super-plane slice: slice 0 = static pRef0 (super at n),
+    // slice 1 = motion pRef (super at refIdx).  Copies the full level-0
+    // region (all nPel^2 sub-planes) at the super row stride (V4/V5).
+    void stageRefSlice(SvmBuffer& buf, int slice, PVideoFrame& f, int plane) {
+        const PlaneGeom& g = (plane == PLANAR_Y) ? gY_ : gU_;
+        const size_t rowbytes = (size_t)g.superPitch * px_;
+        for (int y = 0; y < g.lvl0Rows; y++)
             memcpy(stage_.data() + (size_t)y * rowbytes,
                    f->GetReadPtr(plane) + (size_t)y * f->GetPitch(plane),
                    rowbytes);
-        buf.write(stage_.data(), 0, rowbytes * g.height);
+        buf.write(stage_.data(), (size_t)slice * g.sliceElems * (size_t)px_,
+                  rowbytes * g.lvl0Rows);
     }
 
     // one plane's compensate path: prepare_compensate -> patch + overlap_out
@@ -1050,6 +1048,19 @@ class KMCompensateOCL : public GenericVideoFilter {
             oclhost::dispatch2D(ctx, k, nBlkX(), nBlkY());
         }
         ctx.finish();
+
+        // V5: kt_prepare_compensate encodes per block which super plane it
+        // must read (ref_sel: 1 = motion pRef, 0 = static pRef0).  Slice 0 of
+        // the ref buffer holds pRef0 and slice 1 the motion ref, so motion
+        // blocks get +sliceElems added to their refBase.
+        {
+            std::vector<cl_int> rb((size_t)nb), sel((size_t)nb);
+            rbF_.read(rb.data(), 0, sizeof(cl_int) * nb);
+            rbB_.read(sel.data(), 0, sizeof(cl_int) * nb);
+            for (int b = 0; b < nb; b++)
+                if (sel[b] == 1) rb[b] += g.sliceElems;
+            rbF_.write(rb.data(), 0, sizeof(cl_int) * nb);
+        }
 
         patchOverlap(g, src, dst, refB, refF, winBuf,
                      wsA_, wfA_, wbA_, rbF_, rbB_, refUsableF, ctx, PM);
@@ -1133,7 +1144,7 @@ public:
         : GenericVideoFilter(child), clip_(nullptr) {
         if (timeArg < 0.0 || timeArg > 100.0)
             env_->ThrowError("KMCompensate: time must be 0.0 to 100.0");
-        time256_ = (int)(256.0 * timeArg / 100.0 + 0.5);
+        time256_ = (int)(256.0 * timeArg / 100.0);   // MV.cpp:5122 (truncates)
 
         const KMVParam* p0 = KMVParam::GetParam(vectors->GetVideoInfo(), env_);
         if (p0->nDataType != KMVParam::MV_FRAME)
@@ -1198,7 +1209,7 @@ public:
             srcY_ = SvmBuffer(ctx, bytesY);
             dstY_ = SvmBuffer(ctx, bytesY);
             refBY_ = SvmBuffer(ctx, bytesY);
-            refFY_ = SvmBuffer(ctx, bytesY);
+            refFY_ = SvmBuffer(ctx, bytesY * 2);   // slice 0 static, 1 motion
             if (hasUV_) {
                 srcU_ = SvmBuffer(ctx, bytesUV);
                 srcV_ = SvmBuffer(ctx, bytesUV);
@@ -1206,8 +1217,8 @@ public:
                 dstV_ = SvmBuffer(ctx, bytesUV);
                 refBU_ = SvmBuffer(ctx, bytesUV);
                 refBV_ = SvmBuffer(ctx, bytesUV);
-                refFU_ = SvmBuffer(ctx, bytesUV);
-                refFV_ = SvmBuffer(ctx, bytesUV);
+                refFU_ = SvmBuffer(ctx, bytesUV * 2);
+                refFV_ = SvmBuffer(ctx, bytesUV * 2);
             }
             stage_.resize(std::max(bytesY, bytesUV));
             mvI3_ = SvmBuffer(ctx, sizeof(cl_int) * 4 * nb);
@@ -1290,7 +1301,13 @@ private:
         sc_.read(&scv, 0, sizeof(cl_int));
         const bool refUsable = isUsable && !(scv > nTh2_);
 
-        // ---- 4. stage source + usable super ref
+        // V6: an invalid/out-of-range MV frame and a frame-level scene change
+        // both return the child frame untouched (MV.cpp:5176-5178).  Upstream
+        // CUDA's block-uniform isCopySrc yields the same whole-frame copy.
+        if (!refUsable)
+            return child->GetFrame(n, env_);
+
+        // ---- 4. stage source + both super ref planes (V5)
         PVideoFrame src = child->GetFrame(n, env_);
         stagePlaneRows(srcY_, stage_, src->GetReadPtr(PLANAR_Y),
                        src->GetPitch(PLANAR_Y), vi.width, vi.height, px_);
@@ -1302,12 +1319,16 @@ private:
                            src->GetPitch(PLANAR_V), vi.width >> logUVx_,
                            vi.height >> logUVy_, px_);
         }
-        if (refUsable) {
-            PVideoFrame r = super_->GetFrame(refIdx, env_);
-            stageRefSlice(refBY_, r, PLANAR_Y);
+        {
+            PVideoFrame r0 = super_->GetFrame(n, env_);       // static pRef0
+            PVideoFrame r  = super_->GetFrame(refIdx, env_);  // motion pRef
+            stageRefSlice(refFY_, 0, r0, PLANAR_Y);
+            stageRefSlice(refFY_, 1, r,  PLANAR_Y);
             if (hasUV_) {
-                stageRefSlice(refBU_, r, PLANAR_U);
-                stageRefSlice(refBV_, r, PLANAR_V);
+                stageRefSlice(refFU_, 0, r0, PLANAR_U);
+                stageRefSlice(refFU_, 1, r,  PLANAR_U);
+                stageRefSlice(refFV_, 0, r0, PLANAR_V);
+                stageRefSlice(refFV_, 1, r,  PLANAR_V);
             }
         }
         ctx.finish();

@@ -605,17 +605,38 @@ loop per output frame: MV-clip read (each MV clip frame at index n),
 ALG-VERIFIED `kt_degrain_patch` pixel-combiner core, `kt_overlap_out` overlap
 arithmetic, scene-change gating (`thSCD1`/`thSCD2`), and the time-based blend
 (`time` percent). Compensate reuses `kt_degrain_patch` with WSrc=0/WB=0/WF=time256;
-an invalid MV frame returns the child clip untouched. The int3-strided vs
+an invalid MV frame or a frame-level scene change returns the child clip
+untouched. The int3-strided vs
 packed-VECTOR bridge and plane bitmask are transcribed verbatim, and `thSAD`
 normalization matches upstream exactly. Deviations (documented in the plugin
 header): `limit`/`limitC` are parsed but not applied, binomial uses the CUDA
 form, delta is pinned to 1/2, slice-relative refBase fixup applied. Verified
 headless by `test_ktgmc_compensate.cpp` (real AviSynth+ 3.7.3, direct
 `env->Invoke` typed args + try/catch(AvisynthError), no script strings; plugin
-registration + end-to-end super→analyse→compensate/degrain chain): 14 cases /
+registration + end-to-end super→analyse→compensate/degrain chain): 45 cases /
 0 failures. Build with `build_host_compensate.bat`. The full KTGMC motion
 pipeline (KMSuperOCL → KMAnalyseOCL → KMCompensateOCL/KMDegrain1OCL/KMDegrain2OCL)
 is now complete — all three motion host plugins ship.
+
+## 2026-11-07 — KMCompensate/KMDegrain host-seam audit fixes
+
+A deeper black-box audit of the tenth plugin found host-wiring defects the
+original 14-case registration test could not see. Five deterministic
+regressions (invalid MV frame → source, frame-level scene change → source,
+static-reference blocks reproduce the source, KMDegrain1 all-zero weights →
+source, KMDegrain2 far slice == KMDegrain1) all failed on the previous DLL and
+pass now. Fixes in `ktgmc_compensate_avs.cpp`: each staged super slice carries
+the full level-0 region (`nPel²` sub-planes × `(planeH + 2·vpad)` rows at the
+super row stride), with `pRef0` in slice 0 and the motion `pRef` in slice 1
+plus a per-block `ref_sel` `sliceElems` fixup; degrain MV readback happens per
+delta slice (`vecSc_`/`sadSc_` are scratch, so the old post-loop read
+replicated the last delta into every slice); `time256` truncates exactly like
+MV.cpp:5122; and invalid-MV/out-of-range/scene-change frames take the upstream
+`child->GetFrame(n)` early return. Source staging stays tight (pitch = source
+width) while refs use the super pitch. `test_ktgmc_compensate.cpp` now runs
+45 cases / 0 failures, including a zero-motion known-answer check that
+`time=100` returns the reference frame `n-1`, not the current frame. Full
+Python matrix: 33 runners PASS, `audit_inventory.py` OK.
 
 ## Licensing
 
